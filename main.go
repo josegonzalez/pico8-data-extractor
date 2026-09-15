@@ -5,6 +5,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,19 +20,51 @@ const (
 	versionAddr = 0x8000
 )
 
+// defaultProgName names the tool in the usage text when the process was given
+// no argv[0] to report.
+const defaultProgName = "pico8-data-extractor"
+
+// usageText is the help shown when no input file is given. The single
+// placeholder is the program name.
+const usageText = `Usage: %s <p8.png file> [output] [--only=cat,...]
+If the output is a directory (ends in / or exists), the full cart data is
+extracted into it (sprites, spritesheet, map, JSON). An output ending in
+.p8 writes the cart as .p8 text. Otherwise the Lua code is written to the
+file, or to stdout if none is given.
+For a directory output, --only limits which categories are written
+(comma-separated): metadata, spritesheet, sprites, map, p8.
+`
+
 func main() {
-	only, positional := parseArgs(os.Args[1:])
-	if len(positional) < 1 {
-		fmt.Fprintf(os.Stderr, "Usage: %s <p8.png file> [output] [--only=cat,...]\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "If the output is a directory (ends in / or exists), the full cart data is\n")
-		fmt.Fprintf(os.Stderr, "extracted into it (sprites, spritesheet, map, JSON). An output ending in\n")
-		fmt.Fprintf(os.Stderr, ".p8 writes the cart as .p8 text. Otherwise the Lua code is written to the\n")
-		fmt.Fprintf(os.Stderr, "file, or to stdout if none is given.\n")
-		fmt.Fprintf(os.Stderr, "For a directory output, --only limits which categories are written\n")
-		fmt.Fprintf(os.Stderr, "(comma-separated): metadata, spritesheet, sprites, map, p8.\n")
-		os.Exit(1)
+	os.Exit(run(os.Args, os.Stdout, os.Stderr))
+}
+
+// printf writes a message to w, discarding the write error: failing to report
+// something is not itself worth reporting.
+func printf(w io.Writer, format string, args ...any) {
+	fmt.Fprintf(w, format, args...) //nolint:errcheck
+}
+
+// run carries out one invocation of the CLI and returns the process exit code.
+// args is the full argument vector, program name included, and every message
+// goes to the given writers rather than the process streams so that the whole
+// command is testable.
+func run(args []string, stdout, stderr io.Writer) int {
+	prog := defaultProgName
+	if len(args) > 0 {
+		prog = args[0]
 	}
-	warnUnknownCategories(only)
+	var argv []string
+	if len(args) > 1 {
+		argv = args[1:]
+	}
+
+	only, positional := parseArgs(argv)
+	if len(positional) < 1 {
+		printf(stderr, usageText, prog)
+		return 1
+	}
+	warnUnknownCategories(stderr, only)
 
 	inputFile := positional[0]
 	var outputFile string
@@ -42,26 +75,22 @@ func main() {
 	// Open and decode the PNG file
 	file, err := os.Open(inputFile)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error opening file %s: %v\n", inputFile, err)
-		os.Exit(1)
+		printf(stderr, "Error opening file %s: %v\n", inputFile, err)
+		return 1
 	}
 	defer file.Close() //nolint:errcheck
 
 	img, err := png.Decode(file)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error decoding PNG: %v\n", err)
-		os.Exit(1)
+		printf(stderr, "Error decoding PNG: %v\n", err)
+		return 1
 	}
 
 	// Extract the embedded cartridge ROM
-	rom, err := extractCartridgeData(img)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error extracting cartridge data: %v\n", err)
-		os.Exit(1)
-	}
+	rom := extractCartridgeData(img)
 	if len(rom) <= versionAddr {
-		fmt.Fprintf(os.Stderr, "Error: cartridge data too small: expected more than %d bytes, got %d\n", versionAddr, len(rom))
-		os.Exit(1)
+		printf(stderr, "Error: cartridge data too small: expected more than %d bytes, got %d\n", versionAddr, len(rom))
+		return 1
 	}
 
 	// Decompress the Lua code section
@@ -71,39 +100,40 @@ func main() {
 	// A directory output means "extract everything with parsepico".
 	if isDirOutput(outputFile) {
 		if err := extractAll(inputFile, outputFile, rom, code, version, only); err != nil {
-			fmt.Fprintf(os.Stderr, "Error extracting cart data: %v\n", err)
-			os.Exit(1)
+			printf(stderr, "Error extracting cart data: %v\n", err)
+			return 1
 		}
-		fmt.Printf("Extracted cart data into %s\n", outputFile)
-		return
+		printf(stdout, "Extracted cart data into %s\n", outputFile)
+		return 0
 	}
 
 	// A .p8 output filename means "write the whole cart as .p8 text".
 	if strings.HasSuffix(strings.ToLower(outputFile), ".p8") {
 		p8 := romToP8(rom, code, version)
 		if err := writeToFile(p8, outputFile); err != nil {
-			fmt.Fprintf(os.Stderr, "Error writing to file %s: %v\n", outputFile, err)
-			os.Exit(1)
+			printf(stderr, "Error writing to file %s: %v\n", outputFile, err)
+			return 1
 		}
-		fmt.Printf("Cart converted and saved to %s\n", outputFile)
-		return
+		printf(stdout, "Cart converted and saved to %s\n", outputFile)
+		return 0
 	}
 
 	// Otherwise emit the Lua code (to the given file, or stdout).
 	lua := p8sciiToUTF8(code)
 	if outputFile != "" {
 		if err := writeToFile(lua, outputFile); err != nil {
-			fmt.Fprintf(os.Stderr, "Error writing to file %s: %v\n", outputFile, err)
-			os.Exit(1)
+			printf(stderr, "Error writing to file %s: %v\n", outputFile, err)
+			return 1
 		}
-		fmt.Printf("Lua code extracted and saved to %s\n", outputFile)
-		return
+		printf(stdout, "Lua code extracted and saved to %s\n", outputFile)
+		return 0
 	}
-	fmt.Print(string(lua))
+	stdout.Write(lua) //nolint:errcheck
+	return 0
 }
 
 // extractCartridgeData extracts the embedded PICO-8 cartridge data from the PNG image
-func extractCartridgeData(img image.Image) ([]byte, error) {
+func extractCartridgeData(img image.Image) []byte {
 	bounds := img.Bounds()
 	width := bounds.Dx()
 	height := bounds.Dy()
@@ -112,10 +142,10 @@ func extractCartridgeData(img image.Image) ([]byte, error) {
 	// including alpha. Read the raw, non-premultiplied channel values (NRGBA):
 	// image.Image.RGBA() would alpha-premultiply and corrupt those low bits,
 	// since cart pixels are typically not fully opaque.
-	var data []byte
+	data := make([]byte, 0, width*height)
 
-	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
 			c := color.NRGBAModel.Convert(img.At(x, y)).(color.NRGBA)
 
 			// Extract 2 least significant bits from each channel and combine into one byte
@@ -125,7 +155,7 @@ func extractCartridgeData(img image.Image) ([]byte, error) {
 		}
 	}
 
-	return data, nil
+	return data
 }
 
 // isDirOutput reports whether the output path should be treated as a directory
@@ -167,7 +197,7 @@ func extractAll(inputFile, outDir string, rom, code []byte, version byte, only [
 	var libOnly []string
 	keepP8 := len(only) == 0
 	for _, c := range only {
-		if c == "p8" {
+		if c == outputP8 {
 			keepP8 = true
 		} else {
 			libOnly = append(libOnly, c)
@@ -215,18 +245,22 @@ func splitCategories(s string) []string {
 	return out
 }
 
+// outputP8 is the --only category for the converted .p8 text, which this tool
+// produces itself rather than via parsepico.
+const outputP8 = "p8"
+
 // warnUnknownCategories prints a warning for any unrecognized --only category.
-func warnUnknownCategories(only []string) {
+func warnUnknownCategories(w io.Writer, only []string) {
 	valid := map[string]bool{
 		pico8.OutputMetadata:    true,
 		pico8.OutputSpritesheet: true,
 		pico8.OutputSprites:     true,
 		pico8.OutputMap:         true,
-		"p8":                    true,
+		outputP8:                true,
 	}
 	for _, c := range only {
 		if !valid[c] {
-			fmt.Fprintf(os.Stderr, "warning: unknown --only category %q (valid: metadata, spritesheet, sprites, map, p8)\n", c)
+			printf(w, "warning: unknown --only category %q (valid: metadata, spritesheet, sprites, map, p8)\n", c)
 		}
 	}
 }
