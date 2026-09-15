@@ -1,0 +1,45 @@
+version: "2"
+run:
+  tests: true
+linters:
+  enable:
+    - goconst
+    - gocritic
+    - gocyclo
+    - revive
+  disable:
+    - gochecknoglobals
+    - gochecknoinits
+  settings:
+    gocritic:
+      enabled-checks:
+        - appendCombine
+        - rangeValCopy
+      disabled-checks:
+        - commentFormatting
+  exclusions:
+    generated: lax
+    rules:
+      - linters:
+          - govet
+        text: composite literal uses unkeyed fields
+    paths:
+      - vendor
+      - .git
+      - node_modules
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - vendor
+      - .git
+      - node_modules
+      - third_party$
+      - builtin$
+      - examples$

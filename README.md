@@ -1,5 +1,7 @@
 # PICO-8 Data Extractor
 
+[![CI](https://github.com/josegonzalez/pico8-data-extractor/actions/workflows/ci.yml/badge.svg)](https://github.com/josegonzalez/pico8-data-extractor/actions/workflows/ci.yml)
+
 A Go program that reads PICO-8 `.p8.png` files: it extracts the Lua code, converts carts to `.p8` text, or extracts the full cart data (sprites, spritesheet, map, and JSON metadata).
 
 ## Overview
@@ -18,19 +20,19 @@ PICO-8 `.p8.png` files are PNG images that contain embedded PICO-8 cartridge dat
 
 ```bash
 # Extract Lua code and print to stdout
-go run . games/Celeste.p8.png
+go run . testdata/celeste.p8.png
 
 # Extract Lua code and save to a file
-go run . games/Celeste.p8.png output.lua
+go run . testdata/celeste.p8.png output.lua
 
 # Convert the cart to .p8 text (output filename ending in .p8)
-go run . games/Celeste.p8.png Celeste.p8
+go run . testdata/celeste.p8.png celeste.p8
 
 # Extract the full cart data into a directory (output ends in / or is a directory)
-go run . games/Celeste.p8.png celeste/
+go run . testdata/celeste.p8.png celeste/
 
 # Extract only specific categories into the directory
-go run . games/Celeste.p8.png celeste/ --only=metadata,map
+go run . testdata/celeste.p8.png celeste/ --only=metadata,map
 ```
 
 The behavior is inferred from the output argument: a directory (ending in `/` or an existing directory) extracts the full cart data into it; an output ending in `.p8` writes the cart as `.p8` text; otherwise the Lua code is written.
@@ -57,8 +59,27 @@ go build -o pico8-extractor .
 
 ## Testing
 
-The project includes a sample Celeste `.p8.png` file for testing:
+```bash
+go test ./...
+```
+
+The suite runs the whole pipeline against real carts committed under `testdata/`: three from picotool, each with the `.p8` text it was built from as reference output, and Celeste as a full-size game. It also builds `.p8.png` carts of its own, so the compression formats none of those carts use are covered too. `testdata/README.md` records where each cart came from and under what license.
+
+CI requires 80% statement coverage, which is checked with:
 
 ```bash
-go run . games/Celeste.p8.png
+go test -race -covermode=atomic -coverprofile=coverage.out ./...
+go tool cover -func=coverage.out
+```
+
+The code-section reader has a fuzz target, since a cart is only ever partly trustworthy input. Its seed corpus runs as part of `go test`; to fuzz for longer:
+
+```bash
+go test -run=^$ -fuzz=FuzzExtractCode -fuzztime=60s
+```
+
+Carts placed in `games/` are gitignored, so a local cart collection is never committed:
+
+```bash
+go run . games/YourCart.p8.png
 ```
