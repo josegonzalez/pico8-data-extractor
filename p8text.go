@@ -25,8 +25,15 @@ func writeHexByte(b *bytes.Buffer, v byte) {
 }
 
 // romToP8 renders a 32KB cart ROM (plus its version byte) and the already
-// decompressed Lua code into .p8 text, byte-compatible with picotool.
+// decompressed Lua code into .p8 text, byte-compatible with picotool. A ROM
+// shorter than the code section yields nil: the section offsets below are
+// fixed, and slicing past the data would either panic or silently render
+// whatever the underlying array happened to hold.
 func romToP8(rom, code []byte, version byte) []byte {
+	if len(rom) < codeStart {
+		return nil
+	}
+
 	var b bytes.Buffer
 
 	b.WriteString("pico-8 cartridge // http://www.pico-8.com\n")

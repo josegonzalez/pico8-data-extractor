@@ -1,3 +1,6 @@
+// Package main reads PICO-8 .p8.png cartridges: it decodes the ROM embedded in
+// the image, decompresses the Lua code section, and writes the code, the full
+// .p8 text cart, or the extracted cart data.
 package main
 
 import "bytes"
@@ -7,6 +10,15 @@ var (
 	pxaHeader = []byte{0x00, 'p', 'x', 'a'}
 	oldHeader = []byte{':', 'c', ':', 0x00}
 )
+
+// headerLen is the size of both compression headers, including the two
+// big-endian length fields that follow the 4-byte magic.
+const headerLen = 8
+
+// maxLiteralBits caps the unary-coded bit width of a PXA literal index. The
+// widest index the format can express (255) needs 8 bits, so anything longer
+// is corrupt data rather than a literal.
+const maxLiteralBits = 8
 
 // compressedLuaCharTable is the 60-entry lookup used by the old ":c:" format;
 // literal indices 0x01..0x3b map directly to these bytes.
@@ -24,13 +36,14 @@ var (
 // (rom[0x4300:0x8000]) given the cart version byte. It detects the PXA and old
 // ":c:" compression formats and falls back to treating the region as
 // uncompressed ASCII. Carriage returns are normalized to spaces, matching
-// PICO-8 / picotool.
+// PICO-8 / picotool. Malformed data yields whatever decoded cleanly rather
+// than an error: a cart is only ever partly trustworthy.
 func extractCode(code []byte, version byte) []byte {
 	var out []byte
 	switch {
-	case version != 0 && bytes.HasPrefix(code, pxaHeader):
+	case version != 0 && len(code) >= headerLen && bytes.HasPrefix(code, pxaHeader):
 		out = decompressPXA(code)
-	case version != 0 && bytes.HasPrefix(code, oldHeader):
+	case version != 0 && len(code) >= headerLen && bytes.HasPrefix(code, oldHeader):
 		out = decompressOld(code)
 	default:
 		out = uncompressedCode(code)
@@ -59,10 +72,18 @@ func uncompressedCode(code []byte) []byte {
 // decompressPXA decompresses the newer "\x00pxa" format. Port of the zepto8 /
 // fake-08 pxa_decompress: a bit-oriented LZ scheme with a move-to-front table.
 func decompressPXA(input []byte) []byte {
+	if len(input) < headerLen {
+		return nil
+	}
 	length := int(input[4])*256 + int(input[5])
 	compressed := int(input[6])*256 + int(input[7])
+	// The header counts the whole stream, itself included; a cart claiming
+	// more than it carries must not read past the buffer.
+	if compressed > len(input) {
+		compressed = len(input)
+	}
 
-	pos := 8 * 8 // stream position in bits
+	pos := headerLen * 8 // stream position in bits
 	getBits := func(count int) uint32 {
 		var n uint32
 		for i := 0; i < count && pos < compressed*8; i, pos = i+1, pos+1 {
@@ -89,8 +110,14 @@ func decompressPXA(input []byte) []byte {
 			nbits := 4
 			for getBits(1) != 0 {
 				nbits++
+				if nbits > maxLiteralBits {
+					return ret
+				}
 			}
 			n := int(getBits(nbits)) + (1 << nbits) - 16
+			if n < 0 || n >= len(state) {
+				return ret
+			}
 			ch := mtfGet(n)
 			if ch == 0 {
 				break
@@ -119,6 +146,12 @@ func decompressPXA(input []byte) []byte {
 			continue
 		}
 
+		// A back-reference reaching behind the start of the output means the
+		// stream is corrupt; keep what decoded so far.
+		if offset > len(ret) {
+			return ret
+		}
+
 		ln := 3
 		for {
 			n := int(getBits(3))
@@ -138,10 +171,13 @@ func decompressPXA(input []byte) []byte {
 // decompress_code: single-byte table literals, 0x00-escaped raw literals, and
 // two-byte LZ back-references.
 func decompressOld(code []byte) []byte {
+	if len(code) < headerLen {
+		return nil
+	}
 	codeLength := int(code[4])<<8 | int(code[5])
 
 	out := make([]byte, 0, codeLength)
-	inI := 8
+	inI := headerLen
 	for len(out) < codeLength && inI < len(code) {
 		b := code[inI]
 		switch {
@@ -160,6 +196,11 @@ func decompressOld(code []byte) []byte {
 			b2 := code[inI]
 			offset := (int(b)-0x3c)*16 + int(b2&0x0f)
 			length := int(b2>>4) + 2
+			// A zero or over-long offset would read outside the output;
+			// keep what decoded so far.
+			if offset == 0 || offset > len(out) {
+				return trimDecompressed(out)
+			}
 			for i := 0; i < length; i++ {
 				out = append(out, out[len(out)-offset])
 			}
@@ -167,6 +208,12 @@ func decompressOld(code []byte) []byte {
 		inI++
 	}
 
+	return trimDecompressed(out)
+}
+
+// trimDecompressed strips the NUL padding and the future-code trailers PICO-8
+// adds around ":c:" compressed source.
+func trimDecompressed(out []byte) []byte {
 	out = bytes.Trim(out, "\x00")
 	out = stripFutureCode(out, futureCode1)
 	out = stripFutureCode(out, futureCode2)
