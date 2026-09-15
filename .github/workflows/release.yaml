@@ -1,0 +1,81 @@
+---
+name: "release"
+
+# yamllint disable-line rule:truthy
+on:
+  workflow_dispatch:
+    inputs:
+      bump_type:
+        description: "Bump type"
+        default: "patch"
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  attestations: write
+  contents: write
+  id-token: write
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: release
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: "go.mod"
+
+      # The grep is not redundant: git's version sort ranks 1.2.0-rc1 above
+      # 1.2.0, so a prerelease tag would otherwise become the base to bump from.
+      - name: Get Latest Tag
+        id: latest-tag
+        run: |
+          latest="$(git tag --list '[0-9]*' --sort=-v:refname | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)"
+          echo "GIT_LATEST_TAG=${latest:-0.0.0}" >>"$GITHUB_OUTPUT"
+
+      - name: Compute Next Tag
+        id: next-tag
+        uses: docker://ghcr.io/dokku/semver-generator:latest
+        with:
+          bump: ${{ github.event.inputs.bump_type }}
+          input: ${{ steps.latest-tag.outputs.GIT_LATEST_TAG }}
+
+      - name: Build binaries
+        run: make build-release VERSION="$VERSION"
+        env:
+          VERSION: ${{ steps.next-tag.outputs.version }}
+
+      - name: Attest Build Provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: dist/pico8-data-extractor-*
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/*
+
+      - name: Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.next-tag.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          files: dist/*
+          generate_release_notes: true
+          make_latest: "true"

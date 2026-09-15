@@ -2,3 +2,4 @@ games/*
 pico8-data-extractor
 coverage.out
 tmp/
+dist/
