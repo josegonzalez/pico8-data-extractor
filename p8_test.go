@@ -96,6 +96,58 @@ func TestDecompressPXABackref(t *testing.T) {
 	}
 }
 
+// Offsets past 1024 bytes take the widest of the three offset forms.
+func TestDecompressPXAWideBackref(t *testing.T) {
+	raw := make([]byte, 1100)
+	for i := range raw {
+		raw[i] = byte('a' + i%26)
+	}
+
+	w := newPXAWriter()
+	w.writeRawRun(raw)
+	w.writeBackref(len(raw), 3)
+
+	got := decompressPXA(w.stream(len(raw) + 3))
+	want := append(append([]byte{}, raw...), raw[:3]...)
+	if !bytes.Equal(got, want) {
+		t.Errorf("got %d bytes ending %q, want %d ending %q",
+			len(got), tail(got), len(want), tail(want))
+	}
+}
+
+// tail returns the last few bytes of b, for error messages.
+func tail(b []byte) string {
+	if len(b) > 8 {
+		b = b[len(b)-8:]
+	}
+	return string(b)
+}
+
+// A literal resolving to NUL ends the stream even when the header promises
+// more bytes.
+func TestDecompressPXATerminator(t *testing.T) {
+	w := newPXAWriter()
+	for _, b := range []byte("ab") {
+		w.writeLiteral(b)
+	}
+	w.writeTerminator()
+	w.writeLiteral('c')
+
+	if got := decompressPXA(w.stream(5)); string(got) != "ab" {
+		t.Errorf("got %q, want %q", got, "ab")
+	}
+}
+
+// Neither decompressor may read a header out of a buffer too short to hold one.
+func TestDecompressShortInput(t *testing.T) {
+	if got := decompressPXA([]byte("\x00pxa")); got != nil {
+		t.Errorf("pxa: got %q, want nil", got)
+	}
+	if got := decompressOld([]byte(":c:\x00")); got != nil {
+		t.Errorf("old: got %q, want nil", got)
+	}
+}
+
 func TestDecompressOld(t *testing.T) {
 	// ":c:" stream: 3 table-literal 'a' bytes (index 13 in the char table).
 	code := []byte{':', 'c', ':', 0x00, 0x00, 0x03, 0x00, 0x00, 0x0d, 0x0d, 0x0d}

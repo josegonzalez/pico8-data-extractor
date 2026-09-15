@@ -107,16 +107,11 @@ func (w *pxaWriter) writeBits(v uint32, count int) {
 	}
 }
 
-// writeLiteral emits one byte through the move-to-front table, mirroring the
-// table updates decompressPXA makes as it reads. An index is encoded with the
-// smallest width nbits >= 4 whose range [2^nbits-16, 2^(nbits+1)-17] covers
-// it, announced as nbits-4 one bits followed by a zero.
-func (w *pxaWriter) writeLiteral(ch byte) {
-	idx := 0
-	for w.state[idx] != ch {
-		idx++
-	}
-
+// writeLiteralIndex emits one move-to-front index. An index is encoded with
+// the smallest width nbits >= 4 whose range [2^nbits-16, 2^(nbits+1)-17]
+// covers it, announced as nbits-4 one bits followed by a zero. Index 0 always
+// resolves to the NUL that ends the stream.
+func (w *pxaWriter) writeLiteralIndex(idx int) {
 	nbits := 4
 	for idx > (1<<(nbits+1))-17 {
 		nbits++
@@ -128,20 +123,41 @@ func (w *pxaWriter) writeLiteral(ch byte) {
 	}
 	w.writeBit(0)
 	w.writeBits(uint32(idx-(1<<nbits)+16), nbits)
+}
+
+// writeLiteral emits one byte through the move-to-front table, mirroring the
+// table updates decompressPXA makes as it reads.
+func (w *pxaWriter) writeLiteral(ch byte) {
+	idx := 0
+	for w.state[idx] != ch {
+		idx++
+	}
+	w.writeLiteralIndex(idx)
 
 	copy(w.state[1:idx+1], w.state[:idx])
 	w.state[0] = ch
 }
 
 // writeBackref emits a back-reference copying length bytes from offset bytes
-// earlier. The length is carried as 3-bit groups over a base of 3, where a
+// earlier. The offset takes the narrowest of the three widths the format
+// defines. The length is carried as 3-bit groups over a base of 3, where a
 // group of 7 means "continue" - so a length whose remainder is a multiple of
 // seven needs a trailing zero group to terminate.
 func (w *pxaWriter) writeBackref(offset, length int) {
 	w.writeBit(0)
-	w.writeBit(1)
-	w.writeBit(1) // nbits = 5
-	w.writeBits(uint32(offset-1), 5)
+	switch nbits := offsetWidth(offset); nbits {
+	case 5:
+		w.writeBit(1)
+		w.writeBit(1)
+		w.writeBits(uint32(offset-1), 5)
+	case 10:
+		w.writeBit(1)
+		w.writeBit(0)
+		w.writeBits(uint32(offset-1), 10)
+	default:
+		w.writeBit(0)
+		w.writeBits(uint32(offset-1), 15)
+	}
 
 	remaining := length - 3
 	for remaining >= 7 {
@@ -149,6 +165,29 @@ func (w *pxaWriter) writeBackref(offset, length int) {
 		remaining -= 7
 	}
 	w.writeBits(uint32(remaining), 3)
+}
+
+// writeTerminator emits the literal that resolves to NUL, which ends the
+// stream wherever the decoder meets it.
+func (w *pxaWriter) writeTerminator() {
+	idx := 0
+	for w.state[idx] != 0 {
+		idx++
+	}
+	w.writeLiteralIndex(idx)
+}
+
+// offsetWidth returns the bit width the format uses for offset. An offset of 1
+// never takes the 10-bit form, which is reserved there for a raw run.
+func offsetWidth(offset int) int {
+	switch {
+	case offset <= 1<<5:
+		return 5
+	case offset <= 1<<10:
+		return 10
+	default:
+		return 15
+	}
 }
 
 // writeRawRun emits data verbatim: the 10-bit offset form with an offset of 1

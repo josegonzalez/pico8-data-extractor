@@ -390,6 +390,17 @@ func TestRunErrors(t *testing.T) {
 	}
 }
 
+// Without any argv at all, the usage text still names the tool.
+func TestRunWithoutArgv(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := run(nil, &stdout, &stderr); code != 1 {
+		t.Errorf("exit = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "Usage: "+defaultProgName) {
+		t.Errorf("stderr = %q", stderr.String())
+	}
+}
+
 // A directory output that cannot be created is reported, not ignored.
 func TestRunDirectoryOutputError(t *testing.T) {
 	blocker := writeFile(t, "blocker", "x")
