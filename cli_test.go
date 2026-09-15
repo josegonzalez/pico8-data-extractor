@@ -198,6 +198,32 @@ func TestRunWritesLuaToFile(t *testing.T) {
 	}
 }
 
+// --version reports the stamped version and nothing else. It is checked before
+// the arguments are interpreted, so it needs no input file and wins over one
+// that is given.
+func TestRunVersionFlag(t *testing.T) {
+	want := defaultProgName + " " + Version + "\n"
+
+	for _, args := range [][]string{
+		{"--version"},
+		{"-version"},
+		{testCart, "--version"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			code, stdout, stderr := runCLI(t, args...)
+			if code != 0 {
+				t.Fatalf("exit %d, stderr: %s", code, stderr)
+			}
+			if stdout != want {
+				t.Errorf("stdout = %q, want %q", stdout, want)
+			}
+			if stderr != "" {
+				t.Errorf("stderr = %q, want empty", stderr)
+			}
+		})
+	}
+}
+
 // The .p8 suffix is matched case-insensitively.
 func TestRunUppercaseP8Suffix(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "OUT.P8")

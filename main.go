@@ -24,6 +24,11 @@ const (
 // no argv[0] to report.
 const defaultProgName = "pico8-data-extractor"
 
+// Version is the release version, stamped at build time by the Makefile with
+// -ldflags -X. It is deliberately not called "version": in this codebase that
+// name means the PICO-8 cart version byte.
+var Version = "dev"
+
 // usageText is the help shown when no input file is given. The single
 // placeholder is the program name.
 const usageText = `Usage: %s <p8.png file> [output] [--only=cat,...]
@@ -33,6 +38,7 @@ extracted into it (sprites, spritesheet, map, JSON). An output ending in
 file, or to stdout if none is given.
 For a directory output, --only limits which categories are written
 (comma-separated): metadata, spritesheet, sprites, map, p8.
+--version prints the version and exits.
 `
 
 func main() {
@@ -57,6 +63,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 	var argv []string
 	if len(args) > 1 {
 		argv = args[1:]
+	}
+
+	// Checked before parseArgs so that --version works on its own, with no
+	// input file to report as missing.
+	if hasVersionFlag(argv) {
+		printf(stdout, "%s %s\n", defaultProgName, Version)
+		return 0
 	}
 
 	only, positional := parseArgs(argv)
@@ -216,6 +229,18 @@ func extractAll(inputFile, outDir string, rom, code []byte, version byte, only [
 		return os.Remove(p8Path)
 	}
 	return nil
+}
+
+// hasVersionFlag reports whether the arguments ask for the version. It is kept
+// out of parseArgs so that the version check can happen before any argument is
+// interpreted as an input file.
+func hasVersionFlag(args []string) bool {
+	for _, a := range args {
+		if a == "--version" || a == "-version" {
+			return true
+		}
+	}
+	return false
 }
 
 // parseArgs splits CLI arguments into the --only category list and the

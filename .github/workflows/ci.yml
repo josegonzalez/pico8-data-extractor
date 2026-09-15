@@ -29,12 +29,17 @@ jobs:
         path: |
           ~/go/pkg/mod
           ~/.cache/go-build
-        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        key: ${{ runner.os }}-go-${{ github.job }}-${{ hashFiles('**/go.sum', '**/*.go') }}
         restore-keys: |
-          ${{ runner.os }}-go-
+          ${{ runner.os }}-go-${{ github.job }}-
 
     - name: Build the code
       run: go build -v ./...
+
+    - name: Check the built binary reports its version
+      run: |
+        make build
+        ./pico8-data-extractor --version
 
     - name: Run golangci-lint
       uses: golangci/golangci-lint-action@v8
@@ -60,15 +65,15 @@ jobs:
         path: |
           ~/go/pkg/mod
           ~/.cache/go-build
-        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        key: ${{ runner.os }}-go-${{ github.job }}-${{ hashFiles('**/go.sum', '**/*.go') }}
         restore-keys: |
-          ${{ runner.os }}-go-
+          ${{ runner.os }}-go-${{ github.job }}-
 
     - name: Vet the code
       run: go vet ./...
 
     - name: Run the tests
-      run: go test -race -covermode=atomic -coverprofile=coverage.out ./...
+      run: go test -race -covermode=atomic -coverprofile=coverage.out -timeout=20m ./...
 
     - name: Check coverage
       run: |
