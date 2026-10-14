@@ -184,6 +184,66 @@ func TestRunPrintsLuaToStdout(t *testing.T) {
 	}
 }
 
+// celesteTitle is what --title prints for Celeste, whose first line is
+// "-- ~celeste~".
+const celesteTitle = "celeste\n"
+
+func TestRunTitle(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"celeste", []string{titleFlag, celesteCart}, celesteTitle},
+		{"game of life", []string{titleFlag, golCart}, "game of life: v1\n"},
+		{"flag after the cart", []string{celesteCart, titleFlag}, celesteTitle},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			code, stdout, stderr := runCLI(t, tt.args...)
+			if code != 0 {
+				t.Fatalf("exit %d, stderr: %s", code, stderr)
+			}
+			if stdout != tt.want {
+				t.Errorf("stdout = %q, want %q", stdout, tt.want)
+			}
+		})
+	}
+}
+
+// Title mode only ever prints, so an output argument is not written to.
+func TestRunTitleIgnoresOutput(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "celeste.lua")
+	code, stdout, stderr := runCLI(t, titleFlag, celesteCart, out)
+	if code != 0 {
+		t.Fatalf("exit %d, stderr: %s", code, stderr)
+	}
+	if stdout != celesteTitle {
+		t.Errorf("stdout = %q", stdout)
+	}
+	if _, err := os.Stat(out); !os.IsNotExist(err) {
+		t.Error("output file was written")
+	}
+}
+
+func TestRunTitleMissing(t *testing.T) {
+	for _, cart := range []string{testCart, emptyCart} {
+		t.Run(cart, func(t *testing.T) {
+			code, stdout, stderr := runCLI(t, titleFlag, cart)
+			if code != 1 {
+				t.Errorf("exit %d, want 1", code)
+			}
+			if stdout != "" {
+				t.Errorf("stdout = %q, want nothing", stdout)
+			}
+			if !strings.Contains(stderr, "No title comment on the first line of "+cart) {
+				t.Errorf("stderr = %q", stderr)
+			}
+		})
+	}
+}
+
 func TestRunWritesLuaToFile(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "celeste.lua")
 	code, stdout, stderr := runCLI(t, celesteCart, out)

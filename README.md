@@ -12,6 +12,7 @@ PICO-8 `.p8.png` files are PNG images that contain embedded PICO-8 cartridge dat
 ## Features
 
 - Extracts Lua code from PICO-8 `.p8.png` files
+- Prints a cart's title from the comment on its first line of code
 - Converts `.p8.png` carts to `.p8` text (Lua, gfx, gff, map, sfx, music)
 - Extracts full cart data (sprite PNGs, spritesheet, map, and JSON) via the [parsepico](https://github.com/josegonzalez/parsepico) library
 - Handles both compression formats (the newer `\x00pxa` and the older `:c:`) and uncompressed code
@@ -58,6 +59,9 @@ go run . testdata/celeste.p8.png celeste/
 # Extract only specific categories into the directory
 go run . testdata/celeste.p8.png celeste/ --only=metadata,map
 
+# Print the cart's title
+go run . --title testdata/celeste.p8.png
+
 # Print the version and exit
 go run . --version
 ```
@@ -65,6 +69,8 @@ go run . --version
 The behavior is inferred from the output argument: a directory (ending in `/` or an existing directory) extracts the full cart data into it; an output ending in `.p8` writes the cart as `.p8` text; otherwise the Lua code is written.
 
 For a directory output, `--only` limits which categories are written (comma-separated): `metadata` (metadata.json), `spritesheet` (spritesheet.png/json and section images), `sprites` (the individual sprite PNGs), `map` (map.png/json), and `p8` (the converted `.p8` text). Unselected categories are skipped entirely rather than generated and discarded.
+
+`--title` prints the cart's title instead of extracting anything, and ignores any output argument. By BBS convention, which PICO-8 also follows when it draws a cart's label, the title is a comment on the very first line of code, written as either `-- title` or `--title`, so no other line is read. Decoration such as the tildes around `-- ~celeste~` is trimmed. The command exits 1 and prints nothing to stdout when the first line holds no title, which is the case when it is code, a block comment, decoration alone, or an author line such as `-- by someone`.
 
 ## How it works
 

@@ -266,21 +266,28 @@ func TestParseArgs(t *testing.T) {
 		name       string
 		args       []string
 		only       []string
+		title      bool
 		positional []string
 	}{
-		{"no flags", []string{argCart}, nil, []string{argCart}},
-		{"double dash", []string{argCart, "--only=map,sprites"}, []string{categoryMap, categorySprites}, []string{argCart}},
-		{"single dash", []string{"-only=map"}, []string{categoryMap}, nil},
-		{"blanks trimmed", []string{"--only= map , ,sprites "}, []string{categoryMap, categorySprites}, nil},
-		{"last flag wins", []string{"--only=" + categoryMap, "--only=sprites"}, []string{categorySprites}, nil},
-		{"empty list", []string{"--only="}, nil, nil},
+		{"no flags", []string{argCart}, nil, false, []string{argCart}},
+		{"double dash", []string{argCart, "--only=map,sprites"}, []string{categoryMap, categorySprites}, false, []string{argCart}},
+		{"single dash", []string{"-only=map"}, []string{categoryMap}, false, nil},
+		{"blanks trimmed", []string{"--only= map , ,sprites "}, []string{categoryMap, categorySprites}, false, nil},
+		{"last flag wins", []string{"--only=" + categoryMap, "--only=sprites"}, []string{categorySprites}, false, nil},
+		{"empty list", []string{"--only="}, nil, false, nil},
+		{"title", []string{titleFlag, argCart}, nil, true, []string{argCart}},
+		{"title after the cart", []string{argCart, titleFlag}, nil, true, []string{argCart}},
+		{"single dash title", []string{"-title", argCart}, nil, true, []string{argCart}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			only, positional := parseArgs(tt.args)
+			only, title, positional := parseArgs(tt.args)
 			if strings.Join(only, ",") != strings.Join(tt.only, ",") {
 				t.Errorf("only = %v, want %v", only, tt.only)
+			}
+			if title != tt.title {
+				t.Errorf("title = %v, want %v", title, tt.title)
 			}
 			if strings.Join(positional, ",") != strings.Join(tt.positional, ",") {
 				t.Errorf("positional = %v, want %v", positional, tt.positional)

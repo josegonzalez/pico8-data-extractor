@@ -31,13 +31,15 @@ var Version = "dev"
 
 // usageText is the help shown when no input file is given. The single
 // placeholder is the program name.
-const usageText = `Usage: %s <p8.png file> [output] [--only=cat,...]
+const usageText = `Usage: %s <p8.png file> [output] [--only=cat,...] [--title]
 If the output is a directory (ends in / or exists), the full cart data is
 extracted into it (sprites, spritesheet, map, JSON). An output ending in
 .p8 writes the cart as .p8 text. Otherwise the Lua code is written to the
 file, or to stdout if none is given.
 For a directory output, --only limits which categories are written
 (comma-separated): metadata, spritesheet, sprites, map, p8.
+--title prints the title from the comment on the cart's first line of code,
+and exits 1 when that line holds no title.
 --version prints the version and exits.
 `
 
@@ -72,7 +74,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 
-	only, positional := parseArgs(argv)
+	only, title, positional := parseArgs(argv)
 	if len(positional) < 1 {
 		printf(stderr, usageText, prog)
 		return 1
@@ -109,6 +111,17 @@ func run(args []string, stdout, stderr io.Writer) int {
 	// Decompress the Lua code section
 	version := rom[versionAddr]
 	code := extractCode(rom[codeStart:codeEnd], version)
+
+	// --title prints only the cart's title, whatever output was given.
+	if title {
+		cartName, ok := cartTitle(p8sciiToUTF8(code))
+		if !ok {
+			printf(stderr, "No title comment on the first line of %s\n", inputFile)
+			return 1
+		}
+		printf(stdout, "%s\n", cartName)
+		return 0
+	}
 
 	// A directory output means "extract everything with parsepico".
 	if isDirOutput(outputFile) {
@@ -243,20 +256,22 @@ func hasVersionFlag(args []string) bool {
 	return false
 }
 
-// parseArgs splits CLI arguments into the --only category list and the
-// positional arguments.
-func parseArgs(args []string) (only, positional []string) {
+// parseArgs splits CLI arguments into the --only category list, whether
+// --title was given, and the positional arguments.
+func parseArgs(args []string) (only []string, title bool, positional []string) {
 	for _, a := range args {
 		switch {
 		case strings.HasPrefix(a, "--only="):
 			only = splitCategories(strings.TrimPrefix(a, "--only="))
 		case strings.HasPrefix(a, "-only="):
 			only = splitCategories(strings.TrimPrefix(a, "-only="))
+		case a == titleFlag || a == "-title":
+			title = true
 		default:
 			positional = append(positional, a)
 		}
 	}
-	return only, positional
+	return only, title, positional
 }
 
 // splitCategories splits a comma-separated category list, trimming blanks.
@@ -269,6 +284,9 @@ func splitCategories(s string) []string {
 	}
 	return out
 }
+
+// titleFlag asks for the cart's title instead of any extraction.
+const titleFlag = "--title"
 
 // outputP8 is the --only category for the converted .p8 text, which this tool
 // produces itself rather than via parsepico.
